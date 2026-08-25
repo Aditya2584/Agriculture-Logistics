@@ -1,5 +1,7 @@
 const farmService = require('./farm.service');
+const warehouseService = require('./warehouse.service');
 const urgencyService = require('./urgency.service');
+const storageService = require('./storage.service');
 const PriorityQueue = require('../utils/priorityQueue');
 
 class ProcessEngineService {
@@ -27,10 +29,13 @@ class ProcessEngineService {
   }
 
   /**
-   * Process all active farms and return prioritized results
+   * Process all active farms and return prioritized results with storage feasibility
    */
   async processFarms() {
-    const farms = await farmService.getAllFarms();
+    const [farms, warehouses] = await Promise.all([
+      farmService.getAllFarms(),
+      warehouseService.getAllWarehouses()
+    ]);
 
     if (!farms || farms.length === 0) {
       return {
@@ -52,6 +57,8 @@ class ProcessEngineService {
 
     while (!pq.isEmpty()) {
       const item = pq.dequeue();
+      const storageFeasibility = storageService.findSuitableWarehouses(item.farm, warehouses);
+
       prioritizedFarms.push({
         farmId: item.farm._id ? item.farm._id.toString() : item.farm.id,
         productName: item.farm.productName,
@@ -63,7 +70,8 @@ class ProcessEngineService {
         remainingPercentage: item.urgency.remainingPercentage,
         urgencyScore: item.urgency.urgencyScore,
         urgencyLevel: item.urgency.urgencyLevel,
-        isExpired: item.urgency.isExpired
+        isExpired: item.urgency.isExpired,
+        storage: storageFeasibility
       });
     }
 
