@@ -1,7 +1,9 @@
 const farmService = require('./farm.service');
 const warehouseService = require('./warehouse.service');
+const truckService = require('./truck.service');
 const urgencyService = require('./urgency.service');
 const storageService = require('./storage.service');
+const truckAssignmentService = require('./truckAssignment.service');
 const PriorityQueue = require('../utils/priorityQueue');
 
 class ProcessEngineService {
@@ -29,21 +31,26 @@ class ProcessEngineService {
   }
 
   /**
-   * Process all active farms and return prioritized results with storage feasibility
+   * Process all active farms and return prioritized results with storage feasibility and truck assignments
    */
   async processFarms() {
-    const [farms, warehouses] = await Promise.all([
+    const [farms, warehouses, trucks] = await Promise.all([
       farmService.getAllFarms(),
-      warehouseService.getAllWarehouses()
+      warehouseService.getAllWarehouses(),
+      truckService.getAllTrucks()
     ]);
 
     if (!farms || farms.length === 0) {
       return {
         totalFarms: 0,
         processedFarms: 0,
-        prioritizedFarms: []
+        prioritizedFarms: [],
+        truckAssignments: []
       };
     }
+
+    // Initialize temporary truck states in memory
+    const truckStates = truckAssignmentService.initTruckStates(trucks);
 
     const pq = new PriorityQueue((a, b) => this.comparePriority(a, b));
 
@@ -59,6 +66,25 @@ class ProcessEngineService {
       const item = pq.dequeue();
       const storageFeasibility = storageService.findSuitableWarehouses(item.farm, warehouses);
 
+      let truckAssignmentResult;
+
+      if (!storageFeasibility.canFullyAccommodate) {
+        truckAssignmentResult = {
+          assigned: false,
+          reason: 'STORAGE_NOT_AVAILABLE'
+        };
+      } else {
+        const bestTruckState = truckAssignmentService.selectBestTruck(item.farm, truckStates);
+        if (bestTruckState) {
+          truckAssignmentResult = truckAssignmentService.assignFarmToTruck(item.farm, bestTruckState);
+        } else {
+          truckAssignmentResult = {
+            assigned: false,
+            reason: 'NO_FEASIBLE_TRUCK'
+          };
+        }
+      }
+
       prioritizedFarms.push({
         farmId: item.farm._id ? item.farm._id.toString() : item.farm.id,
         productName: item.farm.productName,
@@ -71,14 +97,26 @@ class ProcessEngineService {
         urgencyScore: item.urgency.urgencyScore,
         urgencyLevel: item.urgency.urgencyLevel,
         isExpired: item.urgency.isExpired,
-        storage: storageFeasibility
+        storage: storageFeasibility,
+        truckAssignment: truckAssignmentResult
       });
     }
+
+    const truckSummary = truckStates.map((ts) => ({
+      truckId: ts.truckId,
+      name: ts.name,
+      capacity: ts.capacity,
+      initialLoad: ts.initialLoad,
+      assignedLoad: ts.assignedLoad,
+      remainingCapacity: ts.remainingCapacity,
+      assignedFarms: ts.assignedFarms
+    }));
 
     return {
       totalFarms,
       processedFarms: prioritizedFarms.length,
-      prioritizedFarms
+      prioritizedFarms,
+      truckAssignments: truckSummary
     };
   }
 }
