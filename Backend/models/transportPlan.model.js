@@ -3,53 +3,71 @@ const { Schema } = mongoose;
 
 const transportPlanSchema = new Schema(
   {
-    truck: {
+    truckId: {
       type: Schema.Types.ObjectId,
       ref: 'Truck',
       required: [true, 'Truck reference is required']
     },
-    farms: [
-      {
-        type: Schema.Types.ObjectId,
-        ref: 'Farm',
-        required: true
-      }
-    ],
-    warehouse: {
+    warehouseId: {
       type: Schema.Types.ObjectId,
       ref: 'Warehouse',
       required: [true, 'Warehouse reference is required']
     },
-    pickupOrder: [
+    farms: [
       {
-        type: Schema.Types.ObjectId,
-        ref: 'Farm'
+        farmId: {
+          type: Schema.Types.ObjectId,
+          ref: 'Farm',
+          required: true
+        },
+        pickupOrder: {
+          type: Number,
+          required: true
+        },
+        quantity: {
+          type: Number,
+          required: true
+        },
+        urgency: {
+          type: Number,
+          required: true
+        }
       }
     ],
+    route: {
+      startNode: {
+        type: String,
+        required: true
+      },
+      pickupSequence: [
+        {
+          type: String,
+          required: true
+        }
+      ],
+      warehouseNode: {
+        type: String,
+        required: true
+      },
+      legs: [
+        {
+          from: { type: String, required: true },
+          to: { type: String, required: true },
+          distance: { type: Number, required: true },
+          roads: [{ type: String }],
+          nodes: [{ type: String }]
+        }
+      ],
+      totalDistance: {
+        type: Number,
+        required: true,
+        min: [0, 'Total distance cannot be negative']
+      }
+    },
     totalLoad: {
       type: Number,
-      min: [0, 'Total load cannot be negative'],
-      default: 0
-    },
-    remainingCapacity: {
-      type: Number,
-      min: [0, 'Remaining capacity cannot be negative'],
-      default: 0
-    },
-    totalDistance: {
-      type: Number,
-      min: [0, 'Total distance cannot be negative'],
-      default: 0
-    },
-    estimatedTime: {
-      type: Number,
-      min: [0, 'Estimated time cannot be negative'],
-      default: 0
-    },
-    totalCost: {
-      type: Number,
-      min: [0, 'Total cost cannot be negative'],
-      default: 0
+      required: true,
+      min: [0, 'Total load cannot be negative']
     },
     status: {
       type: String,

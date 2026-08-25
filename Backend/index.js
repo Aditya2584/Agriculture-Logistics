@@ -10,6 +10,7 @@ const warehouseRoutes = require('./routes/warehouse.routes');
 const roadRoutes = require('./routes/road.routes');
 const urgencyRoutes = require('./routes/urgency.routes');
 const processEngineRoutes = require('./routes/processEngine.routes');
+const transportPlanRoutes = require('./routes/transportPlan.routes');
 const { notFound, errorHandler } = require('./middlewares/error.middleware');
 
 dotenv.config();
@@ -30,6 +31,7 @@ app.use('/api/warehouses', warehouseRoutes);
 app.use('/api/roads', roadRoutes);
 app.use('/api/urgency', urgencyRoutes);
 app.use('/api/process', processEngineRoutes);
+app.use('/api/transport-plans', transportPlanRoutes);
 
 // Error Handling Middlewares
 app.use(notFound);
