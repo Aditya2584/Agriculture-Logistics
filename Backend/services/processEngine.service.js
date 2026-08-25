@@ -7,6 +7,7 @@ const storageService = require('./storage.service');
 const truckAssignmentService = require('./truckAssignment.service');
 const roadFeasibilityService = require('./roadFeasibility.service');
 const pathfindingService = require('./pathfinding.service');
+const routeOptimizationService = require('./routeOptimization.service');
 const PriorityQueue = require('../utils/priorityQueue');
 
 class ProcessEngineService {
@@ -46,7 +47,7 @@ class ProcessEngineService {
   }
 
   /**
-   * Process all active farms: Urgency -> Storage -> Truck -> Road Graph -> Dijkstra Route
+   * Process all active farms: Urgency -> Storage -> Truck -> Road Graph -> Route Optimization (Multi-farm sequence)
    */
   async processFarms() {
     const [farms, warehouses, trucks, roads] = await Promise.all([
@@ -72,25 +73,36 @@ class ProcessEngineService {
       warehouseMap.set(id, w);
     });
 
+    // Map farm objects by ID
+    const farmMap = new Map();
+
     // Initialize temporary truck states in memory
     const truckStates = truckAssignmentService.initTruckStates(trucks);
 
     const pq = new PriorityQueue((a, b) => this.comparePriority(a, b));
 
     for (const farm of farms) {
+      const farmId = farm._id ? farm._id.toString() : farm.id;
+      farmMap.set(farmId, farm);
       const urgency = urgencyService.calculateUrgency(farm);
       pq.enqueue({ farm, urgency });
     }
 
     const prioritizedFarms = [];
-    const totalFarms = farms.length;
+    const farmUrgencyMap = new Map();
+    const farmWarehouseMap = new Map();
 
     while (!pq.isEmpty()) {
       const item = pq.dequeue();
+      const farmId = item.farm._id ? item.farm._id.toString() : item.farm.id;
+      farmUrgencyMap.set(farmId, item.urgency);
+
       const storageFeasibility = storageService.findSuitableWarehouses(item.farm, warehouses);
+      if (storageFeasibility.canFullyAccommodate && storageFeasibility.selectedWarehouse) {
+        farmWarehouseMap.set(farmId, storageFeasibility.selectedWarehouse);
+      }
 
       let truckAssignmentResult;
-      let routeResult = null;
 
       if (!storageFeasibility.canFullyAccommodate) {
         truckAssignmentResult = {
@@ -101,19 +113,6 @@ class ProcessEngineService {
         const bestTruckState = truckAssignmentService.selectBestTruck(item.farm, truckStates);
         if (bestTruckState) {
           truckAssignmentResult = truckAssignmentService.assignFarmToTruck(item.farm, bestTruckState);
-
-          // Calculate Dijkstra shortest path from farm location node to selected warehouse node
-          const selectedWh = storageFeasibility.selectedWarehouse;
-          const warehouseDoc = selectedWh ? warehouseMap.get(selectedWh.warehouseId) : null;
-
-          const sourceNode = this.getNodeIdentifier(item.farm);
-          const destNode = this.getNodeIdentifier(warehouseDoc) || (selectedWh ? selectedWh.name : null);
-
-          if (sourceNode && destNode) {
-            // Build truck-specific graph for pathfinding
-            const truckGraphObj = roadFeasibilityService.buildTruckGraph(bestTruckState.truck, roads);
-            routeResult = pathfindingService.findShortestPath(truckGraphObj.graph, sourceNode, destNode);
-          }
         } else {
           truckAssignmentResult = {
             assigned: false,
@@ -123,7 +122,7 @@ class ProcessEngineService {
       }
 
       prioritizedFarms.push({
-        farmId: item.farm._id ? item.farm._id.toString() : item.farm.id,
+        farmId,
         productName: item.farm.productName,
         productType: item.farm.productType,
         quantity: item.farm.quantity,
@@ -135,21 +134,45 @@ class ProcessEngineService {
         urgencyLevel: item.urgency.urgencyLevel,
         isExpired: item.urgency.isExpired,
         storage: storageFeasibility,
-        truckAssignment: truckAssignmentResult,
-        route: routeResult
+        truckAssignment: truckAssignmentResult
       });
     }
 
-    // Build truck-specific graphs only for assigned trucks summary
+    // Run Route Optimization per assigned truck
     const truckSummary = truckStates.map((ts) => {
       let graphResult = {
         feasibleRoads: [],
         graph: {},
         routePossible: false
       };
+      let optimizedRoute = null;
 
       if (ts.assignedFarms.length > 0) {
         graphResult = roadFeasibilityService.buildTruckGraph(ts.truck, roads);
+
+        // Retrieve assigned farm objects with urgency and target warehouse
+        const assignedFarmObjs = ts.assignedFarms.map((fId) => {
+          const farmDoc = farmMap.get(fId);
+          const urgencyObj = farmUrgencyMap.get(fId);
+          return {
+            farm: farmDoc,
+            urgency: urgencyObj
+          };
+        });
+
+        // Identify primary target warehouse (from the first assigned farm)
+        const firstFarmId = ts.assignedFarms[0];
+        const selectedWhMeta = farmWarehouseMap.get(firstFarmId);
+        const warehouseDoc = selectedWhMeta ? warehouseMap.get(selectedWhMeta.warehouseId) : null;
+
+        if (warehouseDoc && graphResult.routePossible) {
+          optimizedRoute = routeOptimizationService.optimizePickupSequence({
+            truckState: ts,
+            assignedFarms: assignedFarmObjs,
+            warehouse: warehouseDoc,
+            graph: graphResult.graph
+          });
+        }
       }
 
       return {
@@ -160,12 +183,13 @@ class ProcessEngineService {
         assignedLoad: ts.assignedLoad,
         remainingCapacity: ts.remainingCapacity,
         assignedFarms: ts.assignedFarms,
-        roadFeasibility: graphResult
+        roadFeasibility: graphResult,
+        optimizedRoute
       };
     });
 
     return {
-      totalFarms,
+      totalFarms: farms.length,
       processedFarms: prioritizedFarms.length,
       prioritizedFarms,
       truckAssignments: truckSummary
