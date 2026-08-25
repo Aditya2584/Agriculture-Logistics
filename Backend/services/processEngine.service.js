@@ -1,9 +1,11 @@
 const farmService = require('./farm.service');
 const warehouseService = require('./warehouse.service');
 const truckService = require('./truck.service');
+const roadService = require('./road.service');
 const urgencyService = require('./urgency.service');
 const storageService = require('./storage.service');
 const truckAssignmentService = require('./truckAssignment.service');
+const roadFeasibilityService = require('./roadFeasibility.service');
 const PriorityQueue = require('../utils/priorityQueue');
 
 class ProcessEngineService {
@@ -31,13 +33,14 @@ class ProcessEngineService {
   }
 
   /**
-   * Process all active farms and return prioritized results with storage feasibility and truck assignments
+   * Process all active farms: Urgency -> Storage -> Truck -> Road Graph
    */
   async processFarms() {
-    const [farms, warehouses, trucks] = await Promise.all([
+    const [farms, warehouses, trucks, roads] = await Promise.all([
       farmService.getAllFarms(),
       warehouseService.getAllWarehouses(),
-      truckService.getAllTrucks()
+      truckService.getAllTrucks(),
+      roadService.getAllRoads()
     ]);
 
     if (!farms || farms.length === 0) {
@@ -102,15 +105,29 @@ class ProcessEngineService {
       });
     }
 
-    const truckSummary = truckStates.map((ts) => ({
-      truckId: ts.truckId,
-      name: ts.name,
-      capacity: ts.capacity,
-      initialLoad: ts.initialLoad,
-      assignedLoad: ts.assignedLoad,
-      remainingCapacity: ts.remainingCapacity,
-      assignedFarms: ts.assignedFarms
-    }));
+    // Build truck-specific graphs only for assigned trucks
+    const truckSummary = truckStates.map((ts) => {
+      let graphResult = {
+        feasibleRoads: [],
+        graph: {},
+        routePossible: false
+      };
+
+      if (ts.assignedFarms.length > 0) {
+        graphResult = roadFeasibilityService.buildTruckGraph(ts.truck, roads);
+      }
+
+      return {
+        truckId: ts.truckId,
+        name: ts.name,
+        capacity: ts.capacity,
+        initialLoad: ts.initialLoad,
+        assignedLoad: ts.assignedLoad,
+        remainingCapacity: ts.remainingCapacity,
+        assignedFarms: ts.assignedFarms,
+        roadFeasibility: graphResult
+      };
+    });
 
     return {
       totalFarms,
