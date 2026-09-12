@@ -1,6 +1,8 @@
+const dotenv = require('dotenv');
+dotenv.config();
+
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
 
 const connectDB = require('./config/db');
 const healthRoutes = require('./routes/health.routes');
@@ -12,8 +14,6 @@ const urgencyRoutes = require('./routes/urgency.routes');
 const processEngineRoutes = require('./routes/processEngine.routes');
 const transportPlanRoutes = require('./routes/transportPlan.routes');
 const { notFound, errorHandler } = require('./middlewares/error.middleware');
-
-dotenv.config();
 
 const app = express();
 
